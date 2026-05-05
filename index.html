@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Invidious Search</title>
+<title>Invidious Multi-Instance Search</title>
 <style>
   body { background:#111; color:#eee; font-family:sans-serif; margin:0; }
   header { padding:1rem; background:#222; display:flex; gap:.5rem; }
@@ -13,7 +13,8 @@
   .card img { width:100%; display:block; }
   .card .info { padding:.5rem; }
   iframe { width:100%; height:360px; border:0; }
-  #errorBox { padding:.7rem; background:#400; color:#f88; display:none; margin:1rem; border-radius:4px; }
+  #errorBox { padding:.7rem; background:#400; color:#f88; display:none; margin:1rem; border-radius:4px; white-space:pre-line; }
+  #usingBox { padding:.7rem; background:#024; color:#8cf; margin:1rem; border-radius:4px; display:none; }
 </style>
 </head>
 <body>
@@ -23,6 +24,7 @@
   <button onclick="search()">Search</button>
 </header>
 
+<div id="usingBox"></div>
 <div id="errorBox"></div>
 
 <iframe id="player" allowfullscreen></iframe>
@@ -30,7 +32,16 @@
 <div id="results"></div>
 
 <script>
-const API = "https://invidious.nerdvpn.de"; // WORKING INSTANCE
+// Multiple fallback instances
+const INSTANCES = [
+  "https://invidious.nerdvpn.de",
+  "https://invidious.flokinet.to",
+  "https://invidious.jing.rocks",
+  "https://invidious.privacydev.net",
+  "https://invidious.protokolla.fi"
+];
+
+let workingInstance = null;
 
 function showError(msg) {
   const box = document.getElementById("errorBox");
@@ -38,10 +49,22 @@ function showError(msg) {
   box.textContent = msg;
 }
 
+function appendError(msg) {
+  const box = document.getElementById("errorBox");
+  box.style.display = "block";
+  box.textContent += "\n" + msg;
+}
+
 function clearError() {
   const box = document.getElementById("errorBox");
   box.style.display = "none";
   box.textContent = "";
+}
+
+function showInstance(instance) {
+  const box = document.getElementById("usingBox");
+  box.style.display = "block";
+  box.textContent = "Using instance: " + instance;
 }
 
 function formatDuration(sec) {
@@ -51,35 +74,49 @@ function formatDuration(sec) {
   return m + ":" + String(s).padStart(2, "0");
 }
 
-async function search() {
+async function findWorkingInstance(query) {
   clearError();
+
+  for (const inst of INSTANCES) {
+    const url = `${inst}/api/v1/search?q=${encodeURIComponent(query)}&type=video`;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        appendError(`${inst} → HTTP ${res.status}`);
+        continue;
+      }
+
+      const json = await res.json();
+      if (!Array.isArray(json)) {
+        appendError(`${inst} → Invalid JSON`);
+        continue;
+      }
+
+      workingInstance = inst;
+      showInstance(inst);
+      return json;
+
+    } catch (e) {
+      appendError(`${inst} → ${e.message}`);
+    }
+  }
+
+  showError("All instances failed.");
+  return null;
+}
+
+async function search() {
   const q = document.getElementById("query").value.trim();
   if (!q) return;
 
-  const url = `${API}/api/v1/search?q=${encodeURIComponent(q)}&type=video`;
+  const results = await findWorkingInstance(q);
+  if (!results) return;
 
-  let data;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      showError("API error: HTTP " + res.status);
-      return;
-    }
-    data = await res.json();
-  } catch (e) {
-    showError("Network or CORS error: " + e.message);
-    return;
-  }
+  const container = document.getElementById("results");
+  container.innerHTML = "";
 
-  if (!Array.isArray(data)) {
-    showError("Invalid API response");
-    return;
-  }
-
-  const results = document.getElementById("results");
-  results.innerHTML = "";
-
-  data.forEach(v => {
+  results.forEach(v => {
     const id = v.videoId;
     const thumb = v.videoThumbnails?.[0]?.url || "";
     const title = v.title || "Untitled";
@@ -96,11 +133,11 @@ async function search() {
       </div>
     `;
     card.onclick = () => {
-      document.getElementById("player").src = `${API}/embed/${id}`;
+      document.getElementById("player").src = `${workingInstance}/embed/${id}`;
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
-    results.appendChild(card);
+    container.appendChild(card);
   });
 }
 </script>
