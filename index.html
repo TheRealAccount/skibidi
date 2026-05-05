@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Invidious Video Search</title>
+<style>
+body {
+font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+margin: 0;
+padding: 0;
+background: #111;
+color: #eee;
+}
+
+header {
+padding: 1rem;
+background: #202020;
+display: flex;
+align-items: center;
+gap: 0.5rem;
+position: sticky;
+top: 0;
+z-index: 10;
+}
+
+header h1 {
+margin: 0;
+font-size: 1.1rem;
+font-weight: 600;
+}
+
+#searchForm {
+display: flex;
+gap: 0.5rem;
+flex: 1;
+max-width: 600px;
+margin-left: 1rem;
+}
+
+#query {
+flex: 1;
+padding: 0.4rem 0.6rem;
+border-radius: 4px;
+border: 1px solid #444;
+background: #181818;
+color: #eee;
+}
+
+#searchBtn {
+padding: 0.4rem 0.9rem;
+border-radius: 4px;
+border: none;
+background: #cc0000;
+color: #fff;
+cursor: pointer;
+font-weight: 600;
+}
+
+#searchBtn:disabled {
+opacity: 0.6;
+cursor: default;
+}
+
+main {
+display: grid;
+grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+gap: 1rem;
+padding: 1rem;
+}
+
+#results {
+display: grid;
+grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+gap: 0.75rem;
+align-content: flex-start;
+max-height: calc(100vh - 80px);
+overflow-y: auto;
+padding-right: 0.25rem;
+}
+
+.card {
+background: #181818;
+border-radius: 6px;
+overflow: hidden;
+border: 1px solid #333;
+display: flex;
+flex-direction: column;
+cursor: pointer;
+transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;
+}
+
+.card:hover {
+transform: translateY(-2px);
+box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+border-color: #444;
+}
+
+.thumb-wrapper {
+position: relative;
+background: #000;
+aspect-ratio: 16 / 9;
+overflow: hidden;
+}
+
+.thumb-wrapper img {
+width: 100%;
+height: 100%;
+object-fit: cover;
+display: block;
+}
+
+.duration {
+position: absolute;
+right: 6px;
+bottom: 6px;
+background: rgba(0, 0, 0, 0.8);
+color: #fff;
+padding: 2px 5px;
+border-radius: 3px;
+font-size: 0.7rem;
+}
+
+.card-body {
+padding: 0.5rem 0.6rem 0.6rem;
+display: flex;
+flex-direction: column;
+gap: 0.25rem;
+}
+
+.title {
+font-size: 0.9rem;
+font-weight: 600;
+line-height: 1.3;
+color: #fff;
+}
+
+.meta {
+font-size: 0.75rem;
+color: #aaa;
+}
+
+#playerContainer {
+background: #181818;
+border-radius: 6px;
+border: 1px solid #333;
+padding: 0.75rem;
+display: flex;
+flex-direction: column;
+gap: 0.5rem;
+max-height: calc(100vh - 80px);
+}
+
+#playerTitle {
+font-size: 1rem;
+font-weight: 600;
+}
+
+#playerMeta {
+font-size: 0.8rem;
+color: #aaa;
+}
+
+#playerFrameWrapper {
+position: relative;
+width: 100%;
+aspect-ratio: 16 / 9;
+background: #000;
+border-radius: 4px;
+overflow: hidden;
+}
+
+#playerFrame {
+width: 100%;
+height: 100%;
+border: none;
+}
+
+#status {
+font-size: 0.8rem;
+color: #bbb;
+min-height: 1.2em;
+}
+
+@media (max-width: 900px) {
+main {
+grid-template-columns: 1fr;
+}
+#results {
+max-height: none;
+order: 2;
+}
+#playerContainer {
+order: 1;
+max-height: none;
+}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>Invidious Search</h1>
+<form id="searchForm">
+<input
+type="text"
+id="query"
+placeholder="Search videos..."
+autocomplete="off"
+required
+/>
+<button id="searchBtn" type="submit">Search</button>
+</form>
+</header>
+
+<main>
+<section id="results"></section>
+
+<section id="playerContainer">
+<div id="playerTitle">No video selected</div>
+<div id="playerMeta"></div>
+<div id="playerFrameWrapper">
+<iframe
+id="playerFrame"
+src=""
+allowfullscreen
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+></iframe>
+</div>
+<div id="status"></div>
+</section>
+</main>
+
+<script>
+// Change this to your preferred Invidious instance
+const INVIDIOUS_INSTANCE = "https://inv.nadeko.net";
+
+const searchForm = document.getElementById("searchForm");
+const queryInput = document.getElementById("query");
+const searchBtn = document.getElementById("searchBtn");
+const resultsEl = document.getElementById("results");
+const statusEl = document.getElementById("status");
+
+const playerTitleEl = document.getElementById("playerTitle");
+const playerMetaEl = document.getElementById("playerMeta");
+const playerFrameEl = document.getElementById("playerFrame");
+
+function formatDuration(seconds) {
+if (!Number.isFinite(seconds)) return "";
+const s = Math.floor(seconds);
+const h = Math.floor(s / 3600);
+const m = Math.floor((s % 3600) / 60);
+const sec = s % 60;
+if (h > 0) {
+return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function createCard(video) {
+const card = document.createElement("article");
+card.className = "card";
+
+const thumbWrapper = document.createElement("div");
+thumbWrapper.className = "thumb-wrapper";
+
+const img = document.createElement("img");
+// Invidious search results usually include videoThumbnails
+const thumb =
+(video.videoThumbnails && video.videoThumbnails[video.videoThumbnails.length - 1]) ||
+(video.videoThumbnails && video.videoThumbnails[0]);
+img.src = thumb ? thumb.url : "";
+img.alt = video.title || "Thumbnail";
+
+const duration = document.createElement("div");
+duration.className = "duration";
+duration.textContent = formatDuration(video.lengthSeconds || video.length_seconds || 0);
+
+thumbWrapper.appendChild(img);
+thumbWrapper.appendChild(duration);
+
+const body = document.createElement("div");
+body.className = "card-body";
+
+const title = document.createElement("div");
+title.className = "title";
+title.textContent = video.title || "Untitled";
+
+const meta = document.createElement("div");
+meta.className = "meta";
+const author = video.author || video.authorName || "Unknown channel";
+const views = video.viewCount || video.view_count;
+const viewText = views != null ? `${views.toLocaleString()} views` : "";
+meta.textContent = [author, viewText].filter(Boolean).join(" • ");
+
+body.appendChild(title);
+body.appendChild(meta);
+
+card.appendChild(thumbWrapper);
+card.appendChild(body);
+
+card.addEventListener("click", () => {
+loadVideo(video);
+window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+return card;
+}
+
+function loadVideo(video) {
+const videoId = video.videoId || video.video_id;
+if (!videoId) return;
+
+const embedUrl = `${INVIDIOUS_INSTANCE}/embed/${encodeURIComponent(videoId)}`;
+
+playerFrameEl.src = embedUrl;
+playerTitleEl.textContent = video.title || "Untitled video";
+
+const author = video.author || video.authorName || "Unknown channel";
+const duration = formatDuration(video.lengthSeconds || video.length_seconds || 0);
+const views = video.viewCount || video.view_count;
+const viewText = views != null ? `${views.toLocaleString()} views` : "";
+playerMetaEl.textContent = [author, duration, viewText].filter(Boolean).join(" • ");
+}
+
+async function searchInvidious(query) {
+const url = new URL(INVIDIOUS_INSTANCE + "/api/v1/search");
+url.searchParams.set("q", query);
+url.searchParams.set("type", "video");
+url.searchParams.set("sort_by", "relevance");
+url.searchParams.set("page", "1");
+
+statusEl.textContent = "Searching...";
+searchBtn.disabled = true;
+
+try {
+const res = await fetch(url.toString());
+if (!res.ok) {
+throw new Error("HTTP " + res.status);
+}
+const data = await res.json();
+resultsEl.innerHTML = "";
+
+if (!Array.isArray(data) || data.length === 0) {
+statusEl.textContent = "No results found.";
+return;
+}
+
+data.forEach((item) => {
+if (item.type === "video" || item.videoId || item.video_id) {
+const card = createCard(item);
+resultsEl.appendChild(card);
+}
+});
+
+statusEl.textContent = `Showing ${resultsEl.children.length} result(s).`;
+} catch (err) {
+console.error(err);
+statusEl.textContent = "Error while searching. Check console for details.";
+} finally {
+searchBtn.disabled = false;
+}
+}
+
+searchForm.addEventListener("submit", (e) => {
+e.preventDefault();
+const q = queryInput.value.trim();
+if (!q) return;
+searchInvidious(q);
+});
+
+// Optional: initial search
+// searchInvidious("lofi hip hop");
+</script>
+</body>
+</html>
